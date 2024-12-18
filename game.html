@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js DOOM Maze</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #healthBar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 200px;
+            height: 20px;
+            background-color: #444;
+        }
+
+        #healthBarFill {
+            height: 100%;
+            width: 100%;
+            background-color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="healthBar">
+        <div id="healthBarFill"></div>
+    </div>
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.171.0/build/three.module.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera.position.set(0, 1.5, 20);
+        camera.lookAt(new THREE.Vector3(0, 1.5, 0));
+
+        const light = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(light);
+        const spotLight = new THREE.SpotLight(0xffffff);
+        spotLight.position.set(0, 10, 0);
+        scene.add(spotLight);
+
+        const textureLoader = new THREE.TextureLoader();
+
+        const wallTexture = textureLoader.load('https://th.bing.com/th/id/OIP.UJm326zBs3WMV8-sD7RBQgHaHa?rs=1&pid=ImgDetMain');
+        const floorTexture = textureLoader.load('https://steamuserimages-a.akamaihd.net/ugc/1761490593351668964/C4BB2263EBA08416BDAC7E9B4C1BE5BCE3531C91/');
+        const ceilingTexture = textureLoader.load('https://blenderartists.org/uploads/default/original/4X/3/4/7/34737648accfbe3103be859aa7731aa1c788c596.gif');
+        const gunTexture = textureLoader.load('crossed-shotgun-silhouette-2.jpg');
+
+        // Texture setup
+        [wallTexture, floorTexture, ceilingTexture, gunTexture].forEach(texture => {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        });
+
+        const mazeWidth = 15;
+        const mazeHeight = 15;
+        const cellSize = 4;
+
+        let maze = generateMaze(mazeWidth, mazeHeight);
+        const walls = [];
+
+        // Generate maze walls
+        for (let i = 0; i < mazeHeight; i++) {
+            for (let j = 0; j < mazeWidth; j++) {
+                if (maze[i][j] === 1) {
+                    const wall = createWall(i, j);
+                    scene.add(wall);
+                    walls.push(wall);
+                }
+            }
+        }
+
+        const floorGeometry = new THREE.PlaneGeometry(mazeWidth * cellSize, mazeHeight * cellSize);
+        const floorMaterial = new THREE.MeshPhongMaterial({ map: floorTexture, side: THREE.DoubleSide });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = 0;
+        scene.add(floor);
+
+        const ceilingGeometry = new THREE.PlaneGeometry(mazeWidth * cellSize, mazeHeight * cellSize);
+        const ceilingMaterial = new THREE.MeshPhongMaterial({ map: ceilingTexture, side: THREE.DoubleSide });
+        const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+        ceiling.rotation.x = Math.PI / 2;
+        ceiling.position.y = 3;
+        scene.add(ceiling);
+
+        // Maze generation function
+        function generateMaze(width, height) {
+            const maze = Array.from({ length: height }, () => Array(width).fill(1));
+            const stack = [];
+            const directions = [
+                [0, -2], [0, 2], [-2, 0], [2, 0]
+            ];
+
+            function shuffle(array) {
+                for (let i = array.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [array[i], array[j]] = [array[j], array[i]];
+                }
+            }
+
+            function carve(x, y) {
+                maze[y][x] = 0;
+                shuffle(directions);
+                for (const [dx, dy] of directions) {
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx > 0 && nx < width && ny > 0 && ny < height && maze[ny][nx] === 1) {
+                        maze[y + dy / 2][x + dx / 2] = 0;
+                        carve(nx, ny);
+                    }
+                }
+            }
+
+            carve(1, 1);
+            maze[0][1] = 0;
+            maze[height - 1][width - 2] = 0;
+            return maze;
+        }
+
+        // Create wall function
+        function createWall(x, z) {
+            const geometry = new THREE.BoxGeometry(cellSize, 3, cellSize);
+            const material = new THREE.MeshPhongMaterial({ map: wallTexture });
+            const wall = new THREE.Mesh(geometry, material);
+            wall.position.set(
+                x * cellSize - (mazeWidth * cellSize) / 2,
+                1.5,
+                z * cellSize - (mazeHeight * cellSize) / 2
+            );
+            wall.geometry.computeBoundingBox();
+            return wall;
+        }
+
+        // Collision check
+        function checkCollision(x, z) {
+            const playerBox = new THREE.Box3().setFromCenterAndSize(
+                new THREE.Vector3(x, 1.5, z),
+                new THREE.Vector3(1, 3, 1)
+            );
+
+            for (const wall of walls) {
+                const wallBox = new THREE.Box3().setFromObject(wall);
+                if (playerBox.intersectsBox(wallBox)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Resize window
+        function setSize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        }
+        window.addEventListener("resize", setSize);
+
+        const keys = { w: false, a: false, s: false, d: false };
+        const moveSpeed = 0.05;
+        const rotateSpeed = 0.03;
+
+        let position = new THREE.Vector3(-mazeWidth * cellSize / 2 + cellSize, 1, -mazeHeight * cellSize / 2 + cellSize);
+        let rotation = 0;
+
+        function keyDown(e) {
+            if (e.code === "KeyW") keys.w = true;
+            if (e.code === "KeyA") keys.a = true;
+            if (e.code === "KeyS") keys.s = true;
+            if (e.code === "KeyD") keys.d = true;
+        }
+
+        function keyUp(e) {
+            if (e.code === "KeyW") keys.w = false;
+            if (e.code === "KeyA") keys.a = false;
+            if (e.code === "KeyS") keys.s = false;
+            if (e.code === "KeyD") keys.d = false;
+        }
+
+        window.addEventListener("keydown", keyDown);
+        window.addEventListener("keyup", keyUp);
+
+        const enemies = [];
+        const enemySpeed = 0.02;
+        let playerHealth = 100;
+
+        // Create enemy function
+        function createEnemy(x, z) {
+            const geometry = new THREE.SphereGeometry(1, 32, 32);
+            const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            const enemy = new THREE.Mesh(geometry, material);
+            enemy.position.set(x, 1.5, z);
+            scene.add(enemy);
+            enemies.push(enemy);
+        }
+
+        function moveEnemies() {
+            for (const enemy of enemies) {
+                const direction = new THREE.Vector3(position.x - enemy.position.x, 0, position.z - enemy.position.z).normalize();
+                const newPos = enemy.position.clone().add(direction.multiplyScalar(enemySpeed));
+
+                if (!checkCollision(newPos.x, newPos.z)) {
+                    enemy.position.set(newPos.x, newPos.y, newPos.z);
+                }
+            }
+        }
+
+        function checkEnemyCollision() {
+            for (const enemy of enemies) {
+                const distance = enemy.position.distanceTo(position);
+                if (distance < 2) {
+                    playerHealth -= 1;
+                    updateHealthBar();
+                    if (playerHealth <= 0) {
+                        alert("Game Over!");
+                        resetGame();
+                    }
+                }
+            }
+        }
+
+        const bullets = [];
+        const bulletSpeed = 0.2;
+
+        // Создаем дробовик
+        function createGun() {
+            const playerGroup = new THREE.Group(); // Группа для игрока, чтобы можно было вращать и перемещать все части дробовика
+
+            // Основной корпус дробовика (компактный прямоугольный блок)
+            const bodyGeometry = new THREE.BoxGeometry(1.0, 0.2, 2.5); // Уменьшенный и более компактный корпус
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x555555 }); // Серый цвет для металла
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.set(0, 0.5, 0); // Позиция корпуса
+            playerGroup.add(body);
+
+            // Ствол дробовика (короткий цилиндр)
+            const barrelGeometry = new THREE.CylinderGeometry(0.18, 0.18, 2.2); // Короткий и утонченный ствол
+            const barrelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); // Темно-серый для ствола
+            const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+            barrel.rotation.x = Math.PI / 2; // Поворот, чтобы ствол был горизонтально
+            barrel.position.set(0, 0.5, 1.5); // Позиция ствола относительно корпуса
+            playerGroup.add(barrel);
+
+            // Цевье дробовика (короткий цилиндр)
+            const gripGeometry = new THREE.CylinderGeometry(0.12, 0.12, 2); // Укороченное и гладкое цевье
+            const gripMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); // Темно-серый для цевья
+            const grip = new THREE.Mesh(gripGeometry, gripMaterial);
+            grip.rotation.x = Math.PI / 2; // Поворот, чтобы цевье было горизонтальным
+            grip.position.set(0, 0.3, -0.8); // Позиция цевья
+            playerGroup.add(grip);
+
+            // Приклад дробовика (меньший прямоугольный блок)
+            const stockGeometry = new THREE.BoxGeometry(0.7, 0.2, 1.2); // Уменьшенный приклад
+            const stockMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 }); // Коричневый для дерева
+            const stock = new THREE.Mesh(stockGeometry, stockMaterial);
+            stock.position.set(0, 0.2, -1.6); // Позиция приклада
+            playerGroup.add(stock);
+
+            // Механизм перезарядки (цилиндр)
+            const reloadGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1.2); // Меньший механизм перезарядки
+            const reloadMaterial = new THREE.MeshPhongMaterial({ color: 0x888888 }); // Светло-серый для механизма
+            const reload = new THREE.Mesh(reloadGeometry, reloadMaterial);
+            reload.rotation.x = Math.PI / 2; // Поворот, чтобы механизм был горизонтальным
+            reload.position.set(0, 0.5, -0.6); // Позиция механизма
+            playerGroup.add(reload);
+
+            // Детали для улучшения внешнего вида
+            const detailGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.5); // Маленькие детали
+            const detailMaterial = new THREE.MeshPhongMaterial({ color: 0x999999 }); // Светлый металл для деталей
+            const detail = new THREE.Mesh(detailGeometry, detailMaterial);
+            detail.rotation.x = Math.PI / 2;
+            detail.position.set(0.5, 0.4, 0.5); // Позиция детали
+            playerGroup.add(detail);
+
+            // Возвращаем группу с дробовиком
+            scene.add(playerGroup);
+
+            return { playerGroup, gun: barrel }; // Возвращаем группу игрока и ствол
+        }
+
+
+
+        function createBullet() {
+            const geometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            const bullet = new THREE.Mesh(geometry, material);
+            bullet.position.set(position.x, position.y, position.z);
+            scene.add(bullet);
+            bullets.push(bullet);
+        }
+
+        function moveBullets() {
+            for (const bullet of bullets) {
+                const direction = new THREE.Vector3(Math.sin(rotation), 0, Math.cos(rotation)).normalize();
+                bullet.position.add(direction.multiplyScalar(bulletSpeed));
+
+                if (checkCollision(bullet.position.x, bullet.position.z)) {
+                    scene.remove(bullet);
+                    bullets.splice(bullets.indexOf(bullet), 1);
+                    return;
+                }
+
+                for (let i = 0; i < enemies.length; i++) {
+                    const enemy = enemies[i];
+                    const distance = bullet.position.distanceTo(enemy.position);
+                    if (distance < 1) {
+                        scene.remove(enemy);
+                        enemies.splice(i, 1);
+                        scene.remove(bullet);
+                        bullets.splice(bullets.indexOf(bullet), 1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "Space") {
+                createBullet();
+            }
+        });
+
+        const { playerGroup, gun } = createGun();
+        for (let i = 0; i < 10; i++) {
+            createEnemy(Math.floor(Math.random() * mazeWidth) * cellSize, Math.floor(Math.random() * mazeHeight) * cellSize);
+        }
+
+        function updateHealthBar() {
+            const healthBarFill = document.getElementById("healthBarFill");
+            healthBarFill.style.width = playerHealth + "%";
+        }
+
+        function resetGame() {
+            position.set(-mazeWidth * cellSize / 2 + cellSize, 1, -mazeHeight * cellSize / 2 + cellSize);
+            playerHealth = 100;
+            updateHealthBar();
+
+            enemies.forEach(enemy => scene.remove(enemy));
+            enemies.length = 0;
+
+            bullets.forEach(bullet => scene.remove(bullet));
+            bullets.length = 0;
+
+            walls.forEach(wall => scene.remove(wall));
+            walls.length = 0;
+
+            maze = generateMaze(mazeWidth, mazeHeight);
+            for (let i = 0; i < mazeHeight; i++) {
+                for (let j = 0; j < mazeWidth; j++) {
+                    if (maze[i][j] === 1) {
+                        const wall = createWall(i, j);
+                        scene.add(wall);
+                        walls.push(wall);
+                    }
+                }
+            }
+
+            for (let i = 0; i < 10; i++) {
+                createEnemy(Math.floor(Math.random() * mazeWidth) * cellSize, Math.floor(Math.random() * mazeHeight) * cellSize);
+            }
+
+            playerGroup.position.set(position.x, position.y, position.z);
+            playerGroup.rotation.y = rotation;
+        }
+
+        function animate() {
+            let newX = position.x;
+            let newZ = position.z;
+
+            if (keys.w) {
+                newX += moveSpeed * Math.sin(rotation);
+                newZ += moveSpeed * Math.cos(rotation);
+            }
+            if (keys.s) {
+                newX -= moveSpeed * Math.sin(rotation);
+                newZ -= moveSpeed * Math.cos(rotation);
+            }
+            if (keys.a) rotation += rotateSpeed;
+            if (keys.d) rotation -= rotateSpeed;
+
+            if (!checkCollision(newX, newZ)) {
+                position.x = newX;
+                position.z = newZ;
+            }
+
+            // Update player position and rotation
+            playerGroup.position.set(position.x, position.y - 0.5, position.z);
+            playerGroup.rotation.y = rotation;
+
+            camera.position.set(position.x, position.y + 0.5, position.z);
+            camera.lookAt(position.x + Math.sin(rotation), position.y + 0.5, position.z + Math.cos(rotation));
+
+            moveEnemies();
+            moveBullets();
+            checkEnemyCollision();
+
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+
+</html>
